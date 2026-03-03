@@ -9,7 +9,7 @@ const userSchema = new Schema(
       trim: true,
       lowercase: true,
     },
-    password: {
+    passwordHash: {
       type: String,
       required: true,
       minLength: [8, "Password must be at least 8 character long"],
