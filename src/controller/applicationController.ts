@@ -7,27 +7,35 @@ export async function createApplication(req: AuthedRequest, res: Response) {
   try {
     const {
       company,
-      title,
+      position,
       status,
-      jobLink = "",
-      dateApplied = null,
+      location = "",
+      salary = 0,
+      currency = "$",
+      jobUrl = "",
+      description = "",
+      appliedAt = null,
       notes = "",
     } = req.body;
 
-    if (!company || !title)
+    if (!company || !position)
       return res
         .status(400)
-        .json({ message: "Company and Tittle are required" });
+        .json({ message: "Company and position are required" });
     if (status && !ApplicationStatus.includes(status))
       return res.status(400).json({ message: "Invalid Status" });
 
     const app = await Application.create({
       userId: new mongoose.Types.ObjectId(req.userId),
       company,
-      title,
+      position,
       status: status || "applied",
-      jobLink,
-      dateApplied: dateApplied ? new Date(dateApplied) : null,
+      location,
+      salary,
+      currency,
+      jobUrl,
+      description,
+      appliedAt: appliedAt ? new Date(appliedAt) : null,
       notes,
     });
 
@@ -36,7 +44,7 @@ export async function createApplication(req: AuthedRequest, res: Response) {
       .json({ app, message: "Application created successfully" });
   } catch (error) {
     console.error(`Error Message: ${error}`);
-    return res.status(500).json({ messae: "Error creating application" });
+    return res.status(500).json({ message: "Error creating application" });
   }
 }
 
