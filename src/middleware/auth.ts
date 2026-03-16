@@ -9,11 +9,10 @@ export async function auth(
   next: NextFunction,
 ) {
   try {
-    const header = req.headers.authorization;
-    if (!header?.startsWith("Bearer ")) {
+    const token = req.cookies.token;
+    if (!token) {
       return res.status(401).json({ message: "Missing token" });
     }
-    const token = header.slice("Bearer ".length);
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       return res.status(401).json({ message: "Missing Secret" });

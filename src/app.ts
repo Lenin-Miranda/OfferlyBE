@@ -10,13 +10,13 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN?.split(",") || "*",
-    credentials: false,
+    origin: process.env.CORS_ORIGIN?.split(",") || "http://localhost:3000",
+    credentials: true,
   }),
 );
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
-app.use("/auth", authRouter);
-app.use("/application", applicationRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/application", applicationRouter);
 
 export default app;

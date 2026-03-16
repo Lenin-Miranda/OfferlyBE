@@ -5,8 +5,6 @@ const STATUS = [
   "interviewing",
   "offer",
   "rejected",
-  "accepted",
-  "withdrawn",
   "ghosted",
 ] as const;
 

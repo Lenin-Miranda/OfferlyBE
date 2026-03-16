@@ -3,6 +3,24 @@ import { type Request, type Response } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
+export async function checkAuth(req: Request, res: Response) {
+  try {
+    const token = req.cookies.token;
+    if (!token) return res.status(401).json({ message: "Unauthorized" });
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "") as {
+      userId: string;
+    };
+    const user = await User.findById(decoded.userId);
+    if (!user) return res.status(401).json({ message: "Unauthorized" });
+
+    return res.status(200).json({ user: { id: user._id, email: user.email } });
+  } catch (e) {
+    console.error(`Error Message: ${e}`);
+    return res.status(500).json({ message: "Auth Check Failed" });
+  }
+}
+
 export async function register(req: Request, res: Response) {
   try {
     const { email, password } = req.body as {
@@ -27,8 +45,9 @@ export async function register(req: Request, res: Response) {
 
     res.cookie("token", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
     return res.status(201).json({
@@ -69,8 +88,9 @@ export async function login(req: Request, res: Response) {
 
     res.cookie("token", token, {
       httpOnly: true,
-      secure: true,
-      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
     return res.status(201).json({

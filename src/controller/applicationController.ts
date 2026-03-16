@@ -18,6 +18,10 @@ export async function createApplication(req: AuthedRequest, res: Response) {
       notes = "",
     } = req.body;
 
+    if (!req.userId) {
+      return res.status(401).json({ message: "User Not authenticated" });
+    }
+
     if (!company || !position)
       return res
         .status(400)
@@ -55,6 +59,10 @@ export async function getApplication(req: AuthedRequest, res: Response) {
     }).sort({
       createdAt: -1,
     });
+
+    if (!req.userId) {
+      return res.status(401).json({ message: "User Not authenticated" });
+    }
     return res.status(200).json({ apps });
   } catch (error) {
     return res.status(500).json({ message: "Application retrieve failed" });
