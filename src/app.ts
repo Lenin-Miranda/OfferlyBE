@@ -17,6 +17,6 @@ app.use(
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use("/api/auth", authRouter);
-app.use("/api/application", applicationRouter);
+app.use("/api/applications", applicationRouter);
 
 export default app;

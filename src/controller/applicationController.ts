@@ -54,15 +54,24 @@ export async function createApplication(req: AuthedRequest, res: Response) {
 
 export async function getApplication(req: AuthedRequest, res: Response) {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ message: "User Not authenticated" });
+    }
+
     const apps = await Application.find({
       userId: new mongoose.Types.ObjectId(req.userId),
     }).sort({
       createdAt: -1,
     });
 
-    if (!req.userId) {
-      return res.status(401).json({ message: "User Not authenticated" });
+    if (apps.length === 0) {
+      return res.status(200).json({
+        apps: [],
+        message:
+          "No applications found. Start by creating your first job application!",
+      });
     }
+
     return res.status(200).json({ apps });
   } catch (error) {
     return res.status(500).json({ message: "Application retrieve failed" });
