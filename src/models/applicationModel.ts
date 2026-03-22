@@ -5,6 +5,8 @@ const STATUS = [
   "interviewing",
   "offer",
   "rejected",
+  "accepted",
+  "withdrawn",
   "ghosted",
 ] as const;
 
@@ -22,6 +24,7 @@ const applicationSchema = new Schema(
     location: { type: String, default: "", trim: true },
     salary: { type: Number, default: 0 },
     currency: { type: String, default: "$" },
+    dateApplied: { type: Date, default: null },
     jobUrl: { type: String, default: "", trim: true },
     description: { type: String, default: "", trim: true },
     appliedAt: { type: Date, default: null },
