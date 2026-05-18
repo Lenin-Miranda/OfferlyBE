@@ -54,6 +54,13 @@ export const tailorResumePdf: RequestHandler = async (req, res: Response) => {
     }
 
     const extractedResume = await extractResumePdf(request.file.buffer);
+    if (extractedResume.pageCount !== 1) {
+      return res.status(400).json({
+        message:
+          "The uploaded resume must be exactly 1 page. Multi-page resumes are not supported.",
+      });
+    }
+
     const editableLines = extractedResume.lines.filter(
       (line) => line.canEdit && line.text.length >= 4,
     );
