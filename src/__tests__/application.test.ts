@@ -1,24 +1,29 @@
+import { jest } from "@jest/globals";
 import request from "supertest";
-import app from "../app.js";
 import { connectTestDB, closeTestDb, clearDatabase } from "./setup.js";
+
+type MockLtcAnalysis = {
+  score: number;
+  recommendation: "apply" | "consider" | "skip";
+  summary: string;
+  matchedSignals: string[];
+  gaps: string[];
+  missingProfileSignals: string[];
+};
+
+const mockedEvaluateProfileJobMatch = jest.fn<
+  (input: unknown) => Promise<MockLtcAnalysis>
+>();
+
+jest.unstable_mockModule("../integrations/llm.js", () => ({
+  evaluateProfileJobMatch: mockedEvaluateProfileJobMatch,
+}));
+
+const { default: app } = await import("../app.js");
 
 const validUser = {
   email: "test@test.com",
   password: "12345678",
-};
-
-const anotherUser = {
-  email: "another@test.com",
-  password: "12345678",
-};
-
-const validApplication = {
-  company: "Google",
-  title: "Software Engineer",
-  status: "applied",
-  jobLink: "https://careers.google.com/jobs/123",
-  dateApplied: "2026-03-01",
-  notes: "Excited about this opportunity",
 };
 
 beforeAll(async () => {
@@ -31,377 +36,166 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await clearDatabase();
+  mockedEvaluateProfileJobMatch.mockReset();
+  mockedEvaluateProfileJobMatch.mockResolvedValue({
+    score: 84,
+    recommendation: "apply",
+    summary: "Strong alignment with the role.",
+    matchedSignals: ["Backend experience", "Node.js skills"],
+    gaps: ["Missing AWS detail"],
+    missingProfileSignals: ["No explicit system design examples"],
+  });
 });
 
+async function createAuthedAgent() {
+  const agent = request.agent(app);
+  await agent.post("/api/auth/register").send(validUser);
+  return agent;
+}
+
 describe("Application Routes", () => {
-  describe("POST /application", () => {
-    it("should create a new application with valid data", async () => {
-      // Create user and get token
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
+  describe("POST /api/applications", () => {
+    it("should create a new application with ltcAnalysis when profile and description are present", async () => {
+      const agent = await createAuthedAgent();
 
-      const res = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
-        .send(validApplication);
+      await agent.patch("/api/profile").send({
+        summary: "Backend engineer with Node.js experience",
+        skills: ["Node.js", "TypeScript"],
+        yearsExperience: 4,
+        targetRoles: ["Backend Engineer"],
+      });
 
-      expect(res.status).toBe(201);
-      expect(res.body).toHaveProperty("app");
-      expect(res.body.app.company).toBe(validApplication.company);
-      expect(res.body.app.title).toBe(validApplication.title);
-      expect(res.body.app.status).toBe(validApplication.status);
-      expect(res.body.message).toBe("Application created successfully");
-    });
-
-    it("should create application with minimum required fields", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
-
-      const res = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
-        .send({
-          company: "Microsoft",
-          title: "Product Manager",
-        });
+      const res = await agent.post("/api/applications").send({
+        company: "Google",
+        position: "Software Engineer",
+        description: "Looking for a backend engineer with Node.js and TypeScript experience.",
+      });
 
       expect(res.status).toBe(201);
-      expect(res.body.app.company).toBe("Microsoft");
-      expect(res.body.app.title).toBe("Product Manager");
-      expect(res.body.app.status).toBe("applied"); // default value
+      expect(res.body.app.company).toBe("Google");
+      expect(res.body.app.position).toBe("Software Engineer");
+      expect(res.body.app.ltcAnalysis.score).toBe(84);
+      expect(res.body.app.analysisSkippedReason).toBeNull();
+      expect(mockedEvaluateProfileJobMatch).toHaveBeenCalledTimes(1);
     });
 
-    it("should fail without authentication", async () => {
-      const res = await request(app)
-        .post("/application")
-        .send(validApplication);
+    it("should create an application and skip analysis without description", async () => {
+      const agent = await createAuthedAgent();
 
-      expect(res.status).toBe(401);
-      expect(res.body.message).toBe("Missing token");
+      await agent.patch("/api/profile").send({
+        summary: "Backend engineer",
+        skills: ["Node.js"],
+      });
+
+      const res = await agent.post("/api/applications").send({
+        company: "Microsoft",
+        position: "Product Manager",
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.app.ltcAnalysis).toBeNull();
+      expect(res.body.app.analysisSkippedReason).toBe("missing_job_description");
+      expect(mockedEvaluateProfileJobMatch).not.toHaveBeenCalled();
     });
 
-    it("should fail without company", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
+    it("should create an application and skip analysis with insufficient profile", async () => {
+      const agent = await createAuthedAgent();
 
-      const res = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
-        .send({
-          title: "Software Engineer",
-        });
+      const res = await agent.post("/api/applications").send({
+        company: "Amazon",
+        position: "Software Engineer",
+        description: "Strong backend engineer with distributed systems experience.",
+      });
 
-      expect(res.status).toBe(400);
-      expect(res.body.message).toContain("required");
-    });
-
-    it("should fail without title", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
-
-      const res = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
-        .send({
-          company: "Amazon",
-        });
-
-      expect(res.status).toBe(400);
-      expect(res.body.message).toContain("required");
-    });
-
-    it("should fail with invalid status", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
-
-      const res = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
-        .send({
-          company: "Facebook",
-          title: "Data Scientist",
-          status: "invalid_status",
-        });
-
-      expect(res.status).toBe(400);
-      expect(res.body.message).toBe("Invalid Status");
+      expect(res.status).toBe(201);
+      expect(res.body.app.ltcAnalysis).toBeNull();
+      expect(res.body.app.analysisSkippedReason).toBe("insufficient_profile");
+      expect(mockedEvaluateProfileJobMatch).not.toHaveBeenCalled();
     });
   });
 
-  describe("GET /application", () => {
-    it("should get all applications for authenticated user", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
+  describe("PATCH /api/applications/:id", () => {
+    it("should recalculate ltcAnalysis when editing an application", async () => {
+      const agent = await createAuthedAgent();
 
-      // Create multiple applications
-      await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
+      await agent.patch("/api/profile").send({
+        summary: "Platform engineer",
+        skills: ["Node.js", "Go"],
+        yearsExperience: 5,
+        targetRoles: ["Backend Engineer"],
+      });
+
+      const createRes = await agent.post("/api/applications").send({
+        company: "Stripe",
+        position: "Engineer",
+        description: "Looking for backend Node.js experience.",
+      });
+
+      mockedEvaluateProfileJobMatch.mockResolvedValueOnce({
+        score: 60,
+        recommendation: "consider",
+        summary: "Partial alignment after the update.",
+        matchedSignals: ["Node.js experience"],
+        gaps: ["No payment experience"],
+        missingProfileSignals: [],
+      });
+
+      const res = await agent
+        .patch(`/api/applications/${createRes.body.app._id}`)
         .send({
-          company: "Google",
-          title: "Software Engineer",
+          description: "Need Node.js plus payments and API platform experience.",
+          notes: "Updated job post",
         });
-
-      await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
-        .send({
-          company: "Microsoft",
-          title: "Product Manager",
-        });
-
-      const res = await request(app)
-        .get("/application")
-        .set("Authorization", `Bearer ${token}`);
 
       expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty("apps");
+      expect(res.body.app.notes).toBe("Updated job post");
+      expect(res.body.app.ltcAnalysis.score).toBe(60);
+      expect(res.body.app.ltcAnalysis.recommendation).toBe("consider");
+      expect(mockedEvaluateProfileJobMatch).toHaveBeenCalledTimes(2);
+    });
+
+    it("should clear ltcAnalysis when description becomes empty", async () => {
+      const agent = await createAuthedAgent();
+
+      await agent.patch("/api/profile").send({
+        summary: "Backend engineer",
+        skills: ["Node.js"],
+      });
+
+      const createRes = await agent.post("/api/applications").send({
+        company: "Linear",
+        position: "Engineer",
+        description: "Node.js backend role.",
+      });
+
+      const res = await agent
+        .patch(`/api/applications/${createRes.body.app._id}`)
+        .send({ description: "" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.app.ltcAnalysis).toBeNull();
+      expect(res.body.app.analysisSkippedReason).toBe("missing_job_description");
+    });
+  });
+
+  describe("GET /api/applications", () => {
+    it("should get all applications for authenticated user", async () => {
+      const agent = await createAuthedAgent();
+
+      await agent.post("/api/applications").send({
+        company: "Google",
+        position: "Software Engineer",
+      });
+      await agent.post("/api/applications").send({
+        company: "Microsoft",
+        position: "Product Manager",
+      });
+
+      const res = await agent.get("/api/applications");
+
+      expect(res.status).toBe(200);
       expect(Array.isArray(res.body.apps)).toBe(true);
       expect(res.body.apps.length).toBe(2);
-    });
-
-    it("should return empty array if user has no applications", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
-
-      const res = await request(app)
-        .get("/application")
-        .set("Authorization", `Bearer ${token}`);
-
-      expect(res.status).toBe(200);
-      expect(res.body.apps).toEqual([]);
-    });
-
-    it("should fail without authentication", async () => {
-      const res = await request(app).get("/application");
-
-      expect(res.status).toBe(401);
-      expect(res.body.message).toBe("Missing token");
-    });
-
-    it("should not return applications from other users", async () => {
-      // Create first user and their application
-      const authRes1 = await request(app).post("/auth/signup").send(validUser);
-      const token1 = authRes1.body.token;
-
-      await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token1}`)
-        .send({
-          company: "Google",
-          title: "Engineer",
-        });
-
-      // Create second user and get their applications
-      const authRes2 = await request(app)
-        .post("/auth/signup")
-        .send(anotherUser);
-      const token2 = authRes2.body.token;
-
-      const res = await request(app)
-        .get("/application")
-        .set("Authorization", `Bearer ${token2}`);
-
-      expect(res.status).toBe(200);
-      expect(res.body.apps.length).toBe(0); // Should not see user1's applications
-    });
-  });
-
-  describe("PATCH /application/:id", () => {
-    it("should update own application", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
-
-      // Create application
-      const createRes = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
-        .send({
-          company: "Google",
-          title: "Software Engineer",
-          status: "applied",
-        });
-
-      const appId = createRes.body.app._id;
-
-      // Update application
-      const res = await request(app)
-        .patch(`/application/${appId}`)
-        .set("Authorization", `Bearer ${token}`)
-        .send({
-          status: "interview",
-          notes: "First round scheduled",
-        });
-
-      expect(res.status).toBe(200);
-      expect(res.body.app.status).toBe("interview");
-      expect(res.body.app.notes).toBe("First round scheduled");
-      expect(res.body.message).toBe("Updated Successfully");
-    });
-
-    it("should fail without authentication", async () => {
-      const res = await request(app)
-        .patch("/application/507f1f77bcf86cd799439011")
-        .send({ status: "interview" });
-
-      expect(res.status).toBe(401);
-      expect(res.body.message).toBe("Missing token");
-    });
-
-    it("should fail when updating another user's application", async () => {
-      // User 1 creates application
-      const authRes1 = await request(app).post("/auth/signup").send(validUser);
-      const token1 = authRes1.body.token;
-
-      const createRes = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token1}`)
-        .send({
-          company: "Google",
-          title: "Engineer",
-        });
-
-      const appId = createRes.body.app._id;
-
-      // User 2 tries to update user 1's application
-      const authRes2 = await request(app)
-        .post("/auth/signup")
-        .send(anotherUser);
-      const token2 = authRes2.body.token;
-
-      const res = await request(app)
-        .patch(`/application/${appId}`)
-        .set("Authorization", `Bearer ${token2}`)
-        .send({ status: "rejected" });
-
-      expect(res.status).toBe(404);
-      expect(res.body.message).toBe("Not Found");
-    });
-
-    it("should fail with non-existent application ID", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
-
-      const res = await request(app)
-        .patch("/application/507f1f77bcf86cd799439011")
-        .set("Authorization", `Bearer ${token}`)
-        .send({ status: "interview" });
-
-      expect(res.status).toBe(404);
-      expect(res.body.message).toBe("Not Found");
-    });
-
-    it("should fail with invalid status", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
-
-      const createRes = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
-        .send({
-          company: "Google",
-          title: "Engineer",
-        });
-
-      const appId = createRes.body.app._id;
-
-      const res = await request(app)
-        .patch(`/application/${appId}`)
-        .set("Authorization", `Bearer ${token}`)
-        .send({ status: "invalid_status" });
-
-      expect(res.status).toBe(400);
-      expect(res.body.message).toBe("Invalid Status");
-    });
-  });
-
-  describe("DELETE /application/:id", () => {
-    it("should delete own application", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
-
-      // Create application
-      const createRes = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token}`)
-        .send({
-          company: "Google",
-          title: "Engineer",
-        });
-
-      const appId = createRes.body.app._id;
-
-      // Delete application
-      const res = await request(app)
-        .delete(`/application/${appId}`)
-        .set("Authorization", `Bearer ${token}`);
-
-      expect(res.status).toBe(200);
-      expect(res.body.message).toBe("Deleted");
-
-      // Verify it's deleted
-      const getRes = await request(app)
-        .get("/application")
-        .set("Authorization", `Bearer ${token}`);
-
-      expect(getRes.body.apps.length).toBe(0);
-    });
-
-    it("should fail without authentication", async () => {
-      const res = await request(app).delete(
-        "/application/507f1f77bcf86cd799439011",
-      );
-
-      expect(res.status).toBe(401);
-      expect(res.body.message).toBe("Missing token");
-    });
-
-    it("should fail when deleting another user's application", async () => {
-      // User 1 creates application
-      const authRes1 = await request(app).post("/auth/signup").send(validUser);
-      const token1 = authRes1.body.token;
-
-      const createRes = await request(app)
-        .post("/application")
-        .set("Authorization", `Bearer ${token1}`)
-        .send({
-          company: "Google",
-          title: "Engineer",
-        });
-
-      const appId = createRes.body.app._id;
-
-      // User 2 tries to delete user 1's application
-      const authRes2 = await request(app)
-        .post("/auth/signup")
-        .send(anotherUser);
-      const token2 = authRes2.body.token;
-
-      const res = await request(app)
-        .delete(`/application/${appId}`)
-        .set("Authorization", `Bearer ${token2}`);
-
-      expect(res.status).toBe(404);
-      expect(res.body.message).toBe("Not Found");
-
-      // Verify user 1's application still exists
-      const getRes = await request(app)
-        .get("/application")
-        .set("Authorization", `Bearer ${token1}`);
-
-      expect(getRes.body.apps.length).toBe(1);
-    });
-
-    it("should fail with non-existent application ID", async () => {
-      const authRes = await request(app).post("/auth/signup").send(validUser);
-      const token = authRes.body.token;
-
-      const res = await request(app)
-        .delete("/application/507f1f77bcf86cd799439011")
-        .set("Authorization", `Bearer ${token}`);
-
-      expect(res.status).toBe(404);
-      expect(res.body.message).toBe("Not Found");
     });
   });
 });

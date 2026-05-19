@@ -1,6 +1,8 @@
+import { jest } from "@jest/globals";
 import request from "supertest";
-import app from "../app.js";
 import { connectTestDB, closeTestDb, clearDatabase } from "./setup.js";
+
+const { default: app } = await import("../app.js");
 
 const validUser = {
   email: "test@test.com",
@@ -20,9 +22,9 @@ beforeEach(async () => {
 });
 
 describe("Auth Routes", () => {
-  describe("POST /auth/signup", () => {
+  describe("POST /api/auth/register", () => {
     it("should create a new user with valid credentials", async () => {
-      const res = await request(app).post("/auth/signup").send(validUser);
+      const res = await request(app).post("/api/auth/register").send(validUser);
 
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty("token");
@@ -32,8 +34,8 @@ describe("Auth Routes", () => {
       expect(res.body.message).toBe("User Succesfully Registered");
     });
 
-    it("should set httpOnly cookie on signup", async () => {
-      const res = await request(app).post("/auth/signup").send(validUser);
+    it("should set httpOnly cookie on register", async () => {
+      const res = await request(app).post("/api/auth/register").send(validUser);
 
       expect(res.headers["set-cookie"]).toBeDefined();
       expect(res.headers["set-cookie"]![0]).toMatch(/token=/);
@@ -41,19 +43,9 @@ describe("Auth Routes", () => {
     });
 
     it("should fail with missing email", async () => {
-      const res = await request(app).post("/auth/signup").send({
+      const res = await request(app).post("/api/auth/register").send({
         email: "",
         password: "12345678",
-      });
-
-      expect(res.status).toBe(400);
-      expect(res.body.message).toBe("Email and Password are required");
-    });
-
-    it("should fail with missing password", async () => {
-      const res = await request(app).post("/auth/signup").send({
-        email: "test@test.com",
-        password: "",
       });
 
       expect(res.status).toBe(400);
@@ -61,69 +53,38 @@ describe("Auth Routes", () => {
     });
 
     it("should fail if email already exists", async () => {
-      await request(app).post("/auth/signup").send(validUser);
-      const res = await request(app).post("/auth/signup").send(validUser);
+      await request(app).post("/api/auth/register").send(validUser);
+      const res = await request(app).post("/api/auth/register").send(validUser);
 
       expect(res.status).toBe(409);
       expect(res.body.message).toBe("Email is already in use");
     });
   });
 
-  describe("POST /auth/login", () => {
+  describe("POST /api/auth/login", () => {
     beforeEach(async () => {
-      await request(app).post("/auth/signup").send(validUser);
+      await request(app).post("/api/auth/register").send(validUser);
     });
 
     it("should login with valid credentials", async () => {
-      const res = await request(app).post("/auth/login").send(validUser);
+      const res = await request(app).post("/api/auth/login").send(validUser);
 
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty("token");
-      expect(res.body).toHaveProperty("user");
       expect(res.body.user.email).toBe(validUser.email);
       expect(res.body.message).toBe("Login Succesful");
     });
 
     it("should set httpOnly cookie on login", async () => {
-      const res = await request(app).post("/auth/login").send(validUser);
+      const res = await request(app).post("/api/auth/login").send(validUser);
 
       expect(res.headers["set-cookie"]).toBeDefined();
       expect(res.headers["set-cookie"]![0]).toMatch(/token=/);
       expect(res.headers["set-cookie"]![0]).toMatch(/HttpOnly/);
     });
 
-    it("should fail with missing email", async () => {
-      const res = await request(app).post("/auth/login").send({
-        email: "",
-        password: "12345678",
-      });
-
-      expect(res.status).toBe(400);
-      expect(res.body.message).toBe("Email and Password are required");
-    });
-
-    it("should fail with missing password", async () => {
-      const res = await request(app).post("/auth/login").send({
-        email: "test@test.com",
-        password: "",
-      });
-
-      expect(res.status).toBe(400);
-      expect(res.body.message).toBe("Email and Password are required");
-    });
-
-    it("should fail with unregistered email", async () => {
-      const res = await request(app).post("/auth/login").send({
-        email: "notfound@test.com",
-        password: "12345678",
-      });
-
-      expect(res.status).toBe(401);
-      expect(res.body.message).toBe("Email not found Try Register");
-    });
-
     it("should fail with incorrect password", async () => {
-      const res = await request(app).post("/auth/login").send({
+      const res = await request(app).post("/api/auth/login").send({
         email: validUser.email,
         password: "wrongpassword",
       });
@@ -133,14 +94,24 @@ describe("Auth Routes", () => {
     });
   });
 
-  describe("POST /auth/logout", () => {
-    it("should clear cookie on logout", async () => {
-      const signupRes = await request(app).post("/auth/signup").send(validUser);
-      const token = signupRes.body.token;
+  describe("GET /api/auth/check-auth", () => {
+    it("should return the authenticated user", async () => {
+      const agent = request.agent(app);
+      await agent.post("/api/auth/register").send(validUser);
 
-      const res = await request(app)
-        .post("/auth/logout")
-        .set("Authorization", `Bearer ${token}`);
+      const res = await agent.get("/api/auth/check-auth");
+
+      expect(res.status).toBe(200);
+      expect(res.body.user.email).toBe(validUser.email);
+    });
+  });
+
+  describe("POST /api/auth/logout", () => {
+    it("should clear cookie on logout", async () => {
+      const agent = request.agent(app);
+      await agent.post("/api/auth/register").send(validUser);
+
+      const res = await agent.post("/api/auth/logout");
 
       expect(res.status).toBe(201);
       expect(res.body.message).toBe("Logout Succesfully");

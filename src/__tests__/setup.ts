@@ -1,13 +1,14 @@
 import mongoose from "mongoose";
+import { MongoMemoryServer } from "mongodb-memory-server";
 
 let isConnected = false;
+let mongoServer: MongoMemoryServer | null = null;
 
 export async function connectTestDB() {
   if (isConnected) return;
 
-  const uri =
-    process.env.MONGO_URI || "mongodb://localhost:27017/offerly_test_db";
-  await mongoose.connect(uri);
+  mongoServer ??= await MongoMemoryServer.create();
+  await mongoose.connect(mongoServer.getUri());
   isConnected = true;
 }
 
@@ -15,8 +16,14 @@ export async function closeTestDb() {
   if (mongoose.connection.readyState !== 0) {
     await mongoose.connection.dropDatabase();
     await mongoose.connection.close();
-    isConnected = false;
   }
+
+  if (mongoServer) {
+    await mongoServer.stop();
+    mongoServer = null;
+  }
+
+  isConnected = false;
 }
 
 export async function clearDatabase() {

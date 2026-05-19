@@ -46,6 +46,30 @@ type TailorResumeInput = {
   }>;
 };
 
+const ProfileJobMatchSchema = z.object({
+  score: z.number().int().min(0).max(100),
+  recommendation: z.enum(["apply", "consider", "skip"]),
+  summary: z.string(),
+  matchedSignals: z.array(z.string()),
+  gaps: z.array(z.string()),
+  missingProfileSignals: z.array(z.string()),
+});
+
+type EvaluateProfileJobMatchInput = {
+  jobDescription: string;
+  profile: {
+    fullName: string;
+    location: string;
+    summary: string;
+    skills: string[];
+    yearsExperience: number;
+    targetRoles: string[];
+    preferredLocations: string[];
+    remotePreference: "remote" | "hybrid" | "onsite" | "flexible" | "unspecified";
+    workAuthorization: string;
+  };
+};
+
 export const generateResponse = async (prompt: string) => {
   try {
     const res = await getOpenAIClient().chat.completions.create({
@@ -119,6 +143,57 @@ export async function tailorResumeForJob(input: TailorResumeInput) {
 
   if (!response.output_parsed) {
     throw new Error("OpenAI did not return a parsed resume tailoring response");
+  }
+
+  return response.output_parsed;
+}
+
+export async function evaluateProfileJobMatch(
+  input: EvaluateProfileJobMatchInput,
+) {
+  const response = await getOpenAIClient().responses.parse({
+    model: getDefaultModel(),
+    input: [
+      {
+        role: "developer",
+        content: [
+          {
+            type: "input_text",
+            text:
+              "You are a hiring-fit analysis assistant. Evaluate how well a user profile matches a job description without inventing experience, credentials, tools, projects, education, or authorization details. Be conservative when evidence is missing. Use only the provided profile and job description. Score from 0 to 100. Recommendation rules: apply for strong evidence and broad alignment, consider for partial alignment with manageable gaps, skip for weak alignment or major missing requirements. Keep the summary to at most two short sentences. Keep matchedSignals, gaps, and missingProfileSignals concise and specific.",
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: [
+              "User profile JSON:",
+              JSON.stringify(input.profile),
+              "",
+              "Job description:",
+              input.jobDescription,
+              "",
+              "Rules:",
+              "1. Do not assume the candidate has a skill unless the profile explicitly supports it.",
+              "2. Put missing candidate evidence in missingProfileSignals.",
+              "3. Put clear job-vs-profile gaps in gaps.",
+              "4. Return concise matchedSignals that explain the score.",
+              "5. Use recommendation values only from: apply, consider, skip.",
+            ].join("\n"),
+          },
+        ],
+      },
+    ],
+    text: {
+      format: zodTextFormat(ProfileJobMatchSchema, "profile_job_match"),
+    },
+  });
+
+  if (!response.output_parsed) {
+    throw new Error("OpenAI did not return a parsed profile job match");
   }
 
   return response.output_parsed;

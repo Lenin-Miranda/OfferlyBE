@@ -2,6 +2,7 @@ import { User } from "../models/userModel.js";
 import { type Request, type Response } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { Profile } from "../models/profileModel.js";
 
 export async function checkAuth(req: Request, res: Response) {
   try {
@@ -38,6 +39,12 @@ export async function register(req: Request, res: Response) {
 
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({ email, passwordHash });
+    try {
+      await Profile.create({ userId: user._id });
+    } catch (profileError) {
+      await User.findByIdAndDelete(user._id);
+      throw profileError;
+    }
     const token = jwt.sign(
       { userId: user._id.toString() },
       process.env.JWT_SECRET || "",
