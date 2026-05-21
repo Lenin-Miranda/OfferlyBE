@@ -264,6 +264,49 @@ function fitsLine(font: PDFFont, text: string, fontSize: number, width: number) 
   return font.widthOfTextAtSize(text, fontSize) <= width + 1.5;
 }
 
+function getLikelyRightMargin(line: ResumeLine) {
+  return Math.min(Math.max(line.x * 0.5, 24), 72);
+}
+
+function getUsableLineWidth(
+  line: ResumeLine,
+  page: PDFPage,
+  allLines: ResumeLine[],
+) {
+  const xTolerance = Math.max(line.fontSize * 0.75, 6);
+  const fontSizeTolerance = 2;
+  const peerRightEdge = allLines
+    .filter(
+      (candidate) =>
+        candidate.pageIndex === line.pageIndex &&
+        candidate.id !== line.id &&
+        candidate.canEdit &&
+        Math.abs(candidate.x - line.x) <= xTolerance &&
+        Math.abs(candidate.fontSize - line.fontSize) <= fontSizeTolerance,
+    )
+    .reduce(
+      (widestRightEdge, candidate) =>
+        Math.max(widestRightEdge, candidate.x + candidate.width),
+      line.x + line.width,
+    );
+
+  const pageRightEdge =
+    page.getWidth() - getLikelyRightMargin(line);
+  const canUsePageWidthFallback = line.x <= page.getWidth() * 0.45;
+  const heuristicRightEdge = canUsePageWidthFallback
+    ? pageRightEdge
+    : Math.min(
+        pageRightEdge,
+        line.x + line.width + Math.max(line.width * 0.4, line.fontSize * 10),
+      );
+
+  return Math.max(
+    line.width,
+    peerRightEdge - line.x,
+    heuristicRightEdge - line.x,
+  );
+}
+
 function getTextY(line: ResumeLine) {
   return Math.max(line.y - line.fontSize * 0.18, 0);
 }
@@ -422,30 +465,24 @@ export async function renderTailoredResumePdf(params: {
       continue;
     }
 
-    if (replacementText.length > line.maxChars) {
-      rejectedChanges.push({
-        ...change,
-        replacementText,
-        pageIndex: line.pageIndex,
-        originalText: line.text,
-        rejectionReason: "replacement exceeds one-line limit",
-      });
-      continue;
-    }
-
     const page = pages[line.pageIndex];
     if (!page) {
       continue;
     }
 
     const font = await getFont(pdfDoc, fontCache, line.fontName);
-    if (!fitsLine(font, replacementText, line.fontSize, line.width)) {
+    const usableWidth = getUsableLineWidth(
+      line,
+      page,
+      params.extractedResume.lines,
+    );
+    if (!fitsLine(font, replacementText, line.fontSize, usableWidth)) {
       rejectedChanges.push({
         ...change,
         replacementText,
         pageIndex: line.pageIndex,
         originalText: line.text,
-        rejectionReason: "replacement width exceeds original line width",
+        rejectionReason: "replacement width exceeds available line width",
       });
       continue;
     }

@@ -65,7 +65,12 @@ type EvaluateProfileJobMatchInput = {
     yearsExperience: number;
     targetRoles: string[];
     preferredLocations: string[];
-    remotePreference: "remote" | "hybrid" | "onsite" | "flexible" | "unspecified";
+    remotePreference:
+      | "remote"
+      | "hybrid"
+      | "onsite"
+      | "flexible"
+      | "unspecified";
     workAuthorization: string;
   };
 };
@@ -103,8 +108,7 @@ export async function tailorResumeForJob(input: TailorResumeInput) {
         content: [
           {
             type: "input_text",
-            text:
-              "You are a resume tailoring assistant. Align resume lines to the target job post without inventing experience, companies, dates, tools, metrics, or responsibilities. Preserve the resume's existing structure. Only rewrite lines that materially improve relevance. Keep every rewritten line to one visual line, never include newline characters, and never exceed the supplied maxChars value for that line. Prefer concise, ATS-friendly phrasing. Return a short summary of what changed and why.",
+            text: "You are a resume tailoring assistant. Align resume lines to the target job post without inventing experience, companies, dates, tools, metrics, or responsibilities. Preserve the resume's existing structure. Only rewrite lines that materially improve relevance. Keep every rewritten line to one visual line, never include newline characters, and never exceed the supplied maxChars value for that line. Prefer concise, ATS-friendly phrasing. Return a short summary of what changed and why.",
           },
         ],
       },
@@ -159,8 +163,7 @@ export async function evaluateProfileJobMatch(
         content: [
           {
             type: "input_text",
-            text:
-              "You are a hiring-fit analysis assistant. Evaluate how well a user profile matches a job description without inventing experience, credentials, tools, projects, education, or authorization details. Be conservative when evidence is missing. Use only the provided profile and job description. Score from 0 to 100. Recommendation rules: apply for strong evidence and broad alignment, consider for partial alignment with manageable gaps, skip for weak alignment or major missing requirements. Keep the summary to at most two short sentences. Keep matchedSignals, gaps, and missingProfileSignals concise and specific.",
+            text: "You are a hiring-fit analysis assistant. Evaluate how well a user profile matches a job description without inventing experience, credentials, tools, projects, education, or authorization details. Be conservative when evidence is missing. Use only the provided profile and job description. Score from 0 to 100. Recommendation rules: apply for strong evidence and broad alignment, consider for partial alignment with manageable gaps, skip for weak alignment or major missing requirements. Keep the summary to at most two short sentences. Keep matchedSignals, gaps, and missingProfileSignals concise and specific.",
           },
         ],
       },
