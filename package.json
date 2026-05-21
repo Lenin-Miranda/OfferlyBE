@@ -1,12 +1,12 @@
 {
   "name": "offerly-be",
   "version": "1.0.0",
-  "main": "index.ts",
+  "main": "dist/index.js",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.ts",
+    "start": "node dist/index.js",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --forceExit"
   },
   "keywords": [],

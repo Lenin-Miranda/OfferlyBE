@@ -115,7 +115,7 @@ describe("Application Routes", () => {
   });
 
   describe("PATCH /api/applications/:id", () => {
-    it("should recalculate ltcAnalysis when editing an application", async () => {
+    it("should recalculate ltcAnalysis when description changes", async () => {
       const agent = await createAuthedAgent();
 
       await agent.patch("/api/profile").send({
@@ -152,6 +152,32 @@ describe("Application Routes", () => {
       expect(res.body.app.ltcAnalysis.score).toBe(60);
       expect(res.body.app.ltcAnalysis.recommendation).toBe("consider");
       expect(mockedEvaluateProfileJobMatch).toHaveBeenCalledTimes(2);
+    });
+
+    it("should not recalculate ltcAnalysis when only status changes", async () => {
+      const agent = await createAuthedAgent();
+
+      await agent.patch("/api/profile").send({
+        summary: "Backend engineer",
+        skills: ["Node.js", "TypeScript"],
+        yearsExperience: 4,
+        targetRoles: ["Backend Engineer"],
+      });
+
+      const createRes = await agent.post("/api/applications").send({
+        company: "Notion",
+        position: "Software Engineer",
+        description: "Node.js backend role with TypeScript.",
+      });
+
+      const res = await agent
+        .patch(`/api/applications/${createRes.body.app._id}`)
+        .send({ status: "interviewing" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.app.status).toBe("interviewing");
+      expect(res.body.app.ltcAnalysis.score).toBe(84);
+      expect(mockedEvaluateProfileJobMatch).toHaveBeenCalledTimes(1);
     });
 
     it("should clear ltcAnalysis when description becomes empty", async () => {

@@ -20,6 +20,13 @@ export async function auth(
     const payload = jwt.verify(token, secret) as { userId: string };
 
     req.userId = payload.userId;
+    if (
+      process.env.LOG_APPLICATION_PATCH_TIMINGS === "true" &&
+      req.method === "PATCH" &&
+      req.originalUrl.includes("/api/applications/")
+    ) {
+      res.locals.authCompletedAtNs = process.hrtime.bigint();
+    }
     next();
   } catch (e) {
     console.error(`Error Message: ${e}`);

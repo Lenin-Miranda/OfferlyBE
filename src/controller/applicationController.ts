@@ -5,6 +5,9 @@ import mongoose from "mongoose";
 import { Profile } from "../models/profileModel.js";
 import { evaluateProfileJobMatch } from "../integrations/llm.js";
 
+const PATCH_TIMINGS_ENABLED =
+  process.env.LOG_APPLICATION_PATCH_TIMINGS === "true";
+
 const APPLICATION_MUTABLE_FIELDS = [
   "company",
   "position",
@@ -66,6 +69,77 @@ function hasProfileSignal(profile: {
     profile.targetRoles.length > 0 ||
     profile.yearsExperience > 0
   );
+}
+
+function formatDurationMs(startNs: bigint, endNs: bigint) {
+  return `${(Number(endNs - startNs) / 1_000_000).toFixed(2)}ms`;
+}
+
+function createPatchTimingLogger(req: AuthedRequest, res: Response) {
+  const controllerStartedAtNs = process.hrtime.bigint();
+  const requestStartedAtNs =
+    typeof res.locals.requestStartedAtNs === "bigint"
+      ? (res.locals.requestStartedAtNs as bigint)
+      : controllerStartedAtNs;
+  const authCompletedAtNs =
+    typeof res.locals.authCompletedAtNs === "bigint"
+      ? (res.locals.authCompletedAtNs as bigint)
+      : null;
+
+  return {
+    logStage(stage: string, startedAtNs: bigint, endedAtNs = process.hrtime.bigint()) {
+      if (!PATCH_TIMINGS_ENABLED) {
+        return;
+      }
+
+      console.log(
+        `[PATCH /api/applications/${req.params.id}] ${stage}: ${formatDurationMs(
+          startedAtNs,
+          endedAtNs,
+        )}`,
+      );
+    },
+    logBoundary() {
+      if (!PATCH_TIMINGS_ENABLED) {
+        return;
+      }
+
+      if (authCompletedAtNs) {
+        console.log(
+          `[PATCH /api/applications/${req.params.id}] auth+middleware: ${formatDurationMs(
+            requestStartedAtNs,
+            authCompletedAtNs,
+          )}`,
+        );
+      }
+
+      console.log(
+        `[PATCH /api/applications/${req.params.id}] before-controller: ${formatDurationMs(
+          requestStartedAtNs,
+          controllerStartedAtNs,
+        )}`,
+      );
+    },
+    finish() {
+      if (!PATCH_TIMINGS_ENABLED) {
+        return;
+      }
+
+      const endedAtNs = process.hrtime.bigint();
+      console.log(
+        `[PATCH /api/applications/${req.params.id}] controller-total: ${formatDurationMs(
+          controllerStartedAtNs,
+          endedAtNs,
+        )}`,
+      );
+      console.log(
+        `[PATCH /api/applications/${req.params.id}] request-total: ${formatDurationMs(
+          requestStartedAtNs,
+          endedAtNs,
+        )}`,
+      );
+    },
+  };
 }
 
 async function buildAnalysisFields(userId: string, description: string) {
@@ -204,9 +278,14 @@ export async function getApplication(req: AuthedRequest, res: Response) {
 }
 
 export async function editApplication(req: AuthedRequest, res: Response) {
+  const patchTiming = createPatchTimingLogger(req, res);
   try {
     const { id } = req.params;
     const updates = pickApplicationUpdates(req.body as Record<string, unknown>);
+    const shouldRebuildAnalysis = Object.prototype.hasOwnProperty.call(
+      updates,
+      "description",
+    );
 
     if (!id || Array.isArray(id)) {
       return res.status(400).json({ message: "Invalid application ID" });
@@ -220,18 +299,19 @@ export async function editApplication(req: AuthedRequest, res: Response) {
       return res.status(400).json({ message: "Invalid Status" });
     }
 
-    const existingApp = await Application.findOne({
-      _id: new mongoose.Types.ObjectId(id),
-      userId: new mongoose.Types.ObjectId(req.userId),
-    });
+    patchTiming.logBoundary();
 
-    if (!existingApp) {
-      return res.status(404).json({ message: "Not Found" });
+    let analysisFields = {};
+    if (shouldRebuildAnalysis) {
+      const analysisStartedAtNs = process.hrtime.bigint();
+      analysisFields = await buildAnalysisFields(
+        req.userId,
+        updates.description ?? "",
+      );
+      patchTiming.logStage("analysis", analysisStartedAtNs);
     }
 
-    const mergedDescription = updates.description ?? existingApp.description ?? "";
-    const analysisFields = await buildAnalysisFields(req.userId, mergedDescription);
-
+    const dbStartedAtNs = process.hrtime.bigint();
     const app = await Application.findOneAndUpdate(
       {
         _id: new mongoose.Types.ObjectId(id),
@@ -245,7 +325,13 @@ export async function editApplication(req: AuthedRequest, res: Response) {
       },
       { returnDocument: "after" },
     );
+    patchTiming.logStage("db-update", dbStartedAtNs);
 
+    if (!app) {
+      return res.status(404).json({ message: "Not Found" });
+    }
+
+    patchTiming.finish();
     return res.status(200).json({ app, message: "Updated Successfully" });
   } catch (e) {
     console.error(`Error message ${e}`);

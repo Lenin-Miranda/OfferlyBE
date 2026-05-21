@@ -25,6 +25,17 @@ const lazyTailorResumePdf: RequestHandler = async (req, res, next) => {
   }
 };
 
+const patchTimingProbe: RequestHandler = (req, res, next) => {
+  if (
+    process.env.LOG_APPLICATION_PATCH_TIMINGS === "true" &&
+    req.method === "PATCH"
+  ) {
+    res.locals.requestStartedAtNs = process.hrtime.bigint();
+  }
+
+  next();
+};
+
 applicationRouter.post(
   "/resume/tailor",
   auth,
@@ -33,7 +44,7 @@ applicationRouter.post(
 );
 applicationRouter.post("/", auth, createApplication);
 applicationRouter.get("/", auth, getApplication);
-applicationRouter.patch("/:id", auth, editApplication);
+applicationRouter.patch("/:id", patchTimingProbe, auth, editApplication);
 applicationRouter.delete("/:id", auth, deleteApplication);
 
 export { applicationRouter };
