@@ -17,6 +17,8 @@ const mockedEvaluateProfileJobMatch = jest.fn<
 
 jest.unstable_mockModule("../integrations/llm.js", () => ({
   evaluateProfileJobMatch: mockedEvaluateProfileJobMatch,
+  summarizeResumeToProfile: jest.fn(),
+  tailorResumeForJob: jest.fn(),
 }));
 
 const { default: app } = await import("../app.js");

@@ -56,23 +56,27 @@ const ProfileJobMatchSchema = z.object({
   missingProfileSignals: z.array(z.string()),
 });
 
+const RemotePreferenceValues = [
+  "remote",
+  "hybrid",
+  "onsite",
+  "flexible",
+  "unspecified",
+] as const;
+
 const ProfileSchema = z.object({
-  fullName: z.string(),
-  location: z.string(),
-  summary: z.string(),
-  skills: z.array(z.string()),
-  yearsExperience: z.number().int().min(0),
-  targetRoles: z.array(z.string()),
-  preferredLocations: z.array(z.string()),
-  remotePreference: z.enum([
-    "remote",
-    "hybrid",
-    "onsite",
-    "flexible",
-    "unspecified",
-  ]),
-  workAuthorization: z.string(),
-});
+  fullName: z.string().trim().max(200),
+  location: z.string().trim().max(200),
+  summary: z.string().trim().max(2000),
+  skills: z.array(z.string().trim().min(1)).max(50),
+  yearsExperience: z.number().int().min(0).max(80),
+  targetRoles: z.array(z.string().trim().min(1)).max(20),
+  preferredLocations: z.array(z.string().trim().min(1)).max(20),
+  remotePreference: z.enum(RemotePreferenceValues),
+  workAuthorization: z.string().trim().max(200),
+}).partial();
+
+type SummarizedProfile = z.infer<typeof ProfileSchema>;
 
 type EvaluateProfileJobMatchInput = {
   jobDescription: string;
@@ -223,7 +227,7 @@ export async function evaluateProfileJobMatch(
 
 export async function summarizeResumeToProfile(resumePdfBase64: string) {
   const prompt =
-    " You are a resume summarization assistant that extracts key profile information from a resume to create a concise user profile. Focus on identifying the candidate's full name, location, professional summary, skills, years of experience, target roles, preferred locations, remote work preference, and work authorization status. Be conservative in your assumptions and only include information that is clearly supported by the resume content. Return the profile information in a structured JSON format.";
+    "You are a resume summarization assistant that extracts profile information from a resume. Return only fields clearly supported by the resume. Never guess, never infer protected or legal status unless explicitly stated, and omit unknown fields instead of filling placeholders. Keep summaries concise, normalize list values, and prefer conservative extraction over completeness.";
 
   const response = await getOpenAIClient().responses.parse({
     model: getDefaultModel(),
@@ -255,8 +259,28 @@ export async function summarizeResumeToProfile(resumePdfBase64: string) {
     throw new Error("OpenAI did not return a parsed profile summary");
   }
 
+  const summarizedProfile = Object.fromEntries(
+    Object.entries(response.output_parsed as SummarizedProfile).filter(
+      ([, value]) => {
+        if (value === undefined) {
+          return false;
+        }
+
+        if (typeof value === "string") {
+          return value.trim().length > 0;
+        }
+
+        if (Array.isArray(value)) {
+          return value.length > 0;
+        }
+
+        return true;
+      },
+    ),
+  ) as SummarizedProfile;
+
   logger.info("Successfully summarized resume to profile", {
-    profile: response.output_parsed,
+    extractedFields: Object.keys(summarizedProfile),
   });
-  return response.output_parsed;
+  return summarizedProfile;
 }
