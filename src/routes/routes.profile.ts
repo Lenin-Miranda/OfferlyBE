@@ -20,7 +20,7 @@ profileRouter.patch("/", auth, updateProfile);
 profileRouter.post(
   "/summarize-resume",
   auth,
-  resumeUpload.single("resume"),
+  resumeUpload.any(),
   summarizeResumeToProfileController,
 );
 export { profileRouter };

@@ -172,4 +172,25 @@ describe("Profile Routes", () => {
     expect(res.body.profile.location).toBe("San Jose, CA");
     expect(res.body.profile.skills).toEqual(["TypeScript"]);
   });
+
+  it("should accept uploaded PDFs even when the frontend uses the field name `file`", async () => {
+    const agent = await createAuthedAgent();
+    mockedSummarizeResumeToProfile.mockResolvedValue({
+      location: "Remote",
+      skills: ["Node.js"],
+    });
+
+    const resumeBuffer = Buffer.from("%PDF-1.4\nfake resume", "utf8");
+    const res = await agent
+      .post("/api/profile/summarize-resume")
+      .attach("file", resumeBuffer, {
+        filename: "resume.pdf",
+        contentType: "application/pdf",
+      });
+
+    expect(res.status).toBe(200);
+    expect(mockedSummarizeResumeToProfile).toHaveBeenCalledTimes(1);
+    expect(res.body.profile.location).toBe("Remote");
+    expect(res.body.profile.skills).toEqual(["Node.js"]);
+  });
 });

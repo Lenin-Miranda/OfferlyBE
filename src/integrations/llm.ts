@@ -65,16 +65,16 @@ const RemotePreferenceValues = [
 ] as const;
 
 const ProfileSchema = z.object({
-  fullName: z.string().trim().max(200),
-  location: z.string().trim().max(200),
-  summary: z.string().trim().max(2000),
-  skills: z.array(z.string().trim().min(1)).max(50),
-  yearsExperience: z.number().int().min(0).max(80),
-  targetRoles: z.array(z.string().trim().min(1)).max(20),
-  preferredLocations: z.array(z.string().trim().min(1)).max(20),
-  remotePreference: z.enum(RemotePreferenceValues),
-  workAuthorization: z.string().trim().max(200),
-}).partial();
+  fullName: z.string().trim().max(200).nullable(),
+  location: z.string().trim().max(200).nullable(),
+  summary: z.string().trim().max(2000).nullable(),
+  skills: z.array(z.string().trim().min(1)).max(50).nullable(),
+  yearsExperience: z.number().int().min(0).max(80).nullable(),
+  targetRoles: z.array(z.string().trim().min(1)).max(20).nullable(),
+  preferredLocations: z.array(z.string().trim().min(1)).max(20).nullable(),
+  remotePreference: z.enum(RemotePreferenceValues).nullable(),
+  workAuthorization: z.string().trim().max(200).nullable(),
+});
 
 type SummarizedProfile = z.infer<typeof ProfileSchema>;
 
@@ -227,7 +227,7 @@ export async function evaluateProfileJobMatch(
 
 export async function summarizeResumeToProfile(resumePdfBase64: string) {
   const prompt =
-    "You are a resume summarization assistant that extracts profile information from a resume. Return only fields clearly supported by the resume. Never guess, never infer protected or legal status unless explicitly stated, and omit unknown fields instead of filling placeholders. Keep summaries concise, normalize list values, and prefer conservative extraction over completeness.";
+    "You are a resume summarization assistant that extracts profile information from a resume. Return only fields clearly supported by the resume. Never guess, never infer protected or legal status unless explicitly stated, and use null for unknown fields instead of placeholders. Keep summaries concise, normalize list values, and prefer conservative extraction over completeness.";
 
   const response = await getOpenAIClient().responses.parse({
     model: getDefaultModel(),
@@ -262,7 +262,7 @@ export async function summarizeResumeToProfile(resumePdfBase64: string) {
   const summarizedProfile = Object.fromEntries(
     Object.entries(response.output_parsed as SummarizedProfile).filter(
       ([, value]) => {
-        if (value === undefined) {
+        if (value === undefined || value === null) {
           return false;
         }
 

@@ -31,18 +31,19 @@ const profileUpdateSchema = z
 
 type ResumeProfileRequest = AuthedRequest & {
   file?: Express.Multer.File;
+  files?: Express.Multer.File[];
 };
 
 type SummarizedProfile = {
-  fullName?: string | undefined;
-  location?: string | undefined;
-  summary?: string | undefined;
-  skills?: string[] | undefined;
-  yearsExperience?: number | undefined;
-  targetRoles?: string[] | undefined;
-  preferredLocations?: string[] | undefined;
-  remotePreference?: (typeof RemotePreferences)[number] | undefined;
-  workAuthorization?: string | undefined;
+  fullName?: string | null | undefined;
+  location?: string | null | undefined;
+  summary?: string | null | undefined;
+  skills?: string[] | null | undefined;
+  yearsExperience?: number | null | undefined;
+  targetRoles?: string[] | null | undefined;
+  preferredLocations?: string[] | null | undefined;
+  remotePreference?: (typeof RemotePreferences)[number] | null | undefined;
+  workAuthorization?: string | null | undefined;
 };
 
 function dedupeStrings(values: string[]) {
@@ -66,19 +67,37 @@ function normalizeResumePdfBase64(value: string) {
 }
 
 function getSummarizeResumeInput(request: ResumeProfileRequest) {
-  if (request.file) {
-    if (request.file.mimetype !== "application/pdf") {
+  const uploadedFile =
+    request.file ??
+    request.files?.find((file) =>
+      ["resume", "file", "pdf"].includes(file.fieldname.toLowerCase()),
+    ) ??
+    request.files?.[0];
+
+  if (uploadedFile) {
+    if (uploadedFile.mimetype !== "application/pdf") {
       throw new Error("Only PDF resumes are supported");
     }
 
-    if (!isPdfBuffer(request.file.buffer)) {
+    if (!isPdfBuffer(uploadedFile.buffer)) {
       throw new Error("Invalid PDF file");
     }
 
-    return request.file.buffer.toString("base64");
+    return uploadedFile.buffer.toString("base64");
   }
 
-  const { resumePdfBase64 } = request.body as { resumePdfBase64?: string };
+  const body = request.body as {
+    resumePdfBase64?: string;
+    resumeBase64?: string;
+    fileBase64?: string;
+    pdfBase64?: string;
+  };
+  const resumePdfBase64 =
+    body.resumePdfBase64 ??
+    body.resumeBase64 ??
+    body.fileBase64 ??
+    body.pdfBase64;
+
   if (!resumePdfBase64) {
     throw new Error("Missing resume PDF");
   }
