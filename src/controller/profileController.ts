@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type AuthedRequest } from "../middleware/auth.js";
 import { Profile, RemotePreferences } from "../models/profileModel.js";
 import { User } from "../models/userModel.js";
+import { getRequestLogMeta, logger } from "../lib/logger.js";
 
 const stringArraySchema = z
   .array(z.string().trim())
@@ -66,13 +67,23 @@ async function getUserAndProfile(userId: string) {
 export async function getProfile(req: AuthedRequest, res: Response) {
   try {
     if (!req.userId) {
+      logger.warn("Profile fetch rejected: unauthorized", getRequestLogMeta(req, res));
       return res.status(401).json({ message: "Unauthorized" });
     }
 
     const result = await getUserAndProfile(req.userId);
     if (!result) {
+      logger.warn("Profile fetch rejected: user not found", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+      });
       return res.status(401).json({ message: "Unauthorized" });
     }
+
+    logger.info("Profile fetched", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+    });
 
     return res.status(200).json({
       profile: buildProfileResponse(
@@ -82,7 +93,11 @@ export async function getProfile(req: AuthedRequest, res: Response) {
       ),
     });
   } catch (error) {
-    console.error("Error getting profile:", error);
+    logger.error("Failed to get profile", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      error,
+    });
     return res.status(500).json({ message: "Failed to get profile" });
   }
 }
@@ -90,11 +105,17 @@ export async function getProfile(req: AuthedRequest, res: Response) {
 export async function updateProfile(req: AuthedRequest, res: Response) {
   try {
     if (!req.userId) {
+      logger.warn("Profile update rejected: unauthorized", getRequestLogMeta(req, res));
       return res.status(401).json({ message: "Unauthorized" });
     }
 
     const parsed = profileUpdateSchema.safeParse(req.body);
     if (!parsed.success) {
+      logger.warn("Profile update rejected: validation failed", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+        errors: parsed.error.flatten(),
+      });
       return res.status(400).json({
         message: "Invalid profile update",
         errors: parsed.error.flatten(),
@@ -103,6 +124,10 @@ export async function updateProfile(req: AuthedRequest, res: Response) {
 
     const result = await getUserAndProfile(req.userId);
     if (!result) {
+      logger.warn("Profile update rejected: user not found", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+      });
       return res.status(401).json({ message: "Unauthorized" });
     }
 
@@ -117,8 +142,18 @@ export async function updateProfile(req: AuthedRequest, res: Response) {
     );
 
     if (!profile) {
+      logger.error("Profile update failed: database returned null", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+      });
       return res.status(500).json({ message: "Failed to update profile" });
     }
+
+    logger.info("Profile updated", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      updatedFields: Object.keys(parsed.data),
+    });
 
     return res.status(200).json({
       profile: buildProfileResponse(
@@ -129,7 +164,11 @@ export async function updateProfile(req: AuthedRequest, res: Response) {
       message: "Profile updated successfully",
     });
   } catch (error) {
-    console.error("Error updating profile:", error);
+    logger.error("Failed to update profile", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      error,
+    });
     return res.status(500).json({ message: "Failed to update profile" });
   }
 }

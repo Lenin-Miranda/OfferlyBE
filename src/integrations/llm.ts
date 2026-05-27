@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import { z } from "zod";
+import { logger } from "../lib/logger.js";
 
 let openaiClient: OpenAI | null = null;
 
@@ -94,7 +95,7 @@ export const generateResponse = async (prompt: string) => {
     });
     return res.choices[0]?.message.content ?? "";
   } catch (err) {
-    console.error("Error generating response:", err);
+    logger.error("OpenAI text generation failed", { error: err });
     throw new Error("Failed to generate response from LLM");
   }
 };

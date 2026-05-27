@@ -5,6 +5,7 @@ import {
   renderTailoredResumePdf,
 } from "../integrations/resumePdf.js";
 import { tailorResumeForJob } from "../integrations/llm.js";
+import { getRequestLogMeta, logger } from "../lib/logger.js";
 
 type ResumeTailorRequest = AuthedRequest & {
   file: Express.Multer.File | undefined;
@@ -31,16 +32,26 @@ export const tailorResumePdf: RequestHandler = async (req, res: Response) => {
     const request = req as ResumeTailorRequest;
 
     if (!request.userId) {
+      logger.warn("Resume tailoring rejected: unauthorized", getRequestLogMeta(request, res));
       return res.status(401).json({ message: "Unauthorized" });
     }
 
     if (!request.file) {
+      logger.warn("Resume tailoring rejected: missing file", {
+        ...getRequestLogMeta(request, res),
+        userId: request.userId,
+      });
       return res
         .status(400)
         .json({ message: "A resume PDF is required in the `resume` field" });
     }
 
     if (request.file.mimetype !== "application/pdf") {
+      logger.warn("Resume tailoring rejected: invalid mimetype", {
+        ...getRequestLogMeta(request, res),
+        userId: request.userId,
+        mimetype: request.file.mimetype,
+      });
       return res
         .status(400)
         .json({ message: "Only PDF resumes are supported for now" });
@@ -48,6 +59,10 @@ export const tailorResumePdf: RequestHandler = async (req, res: Response) => {
 
     const jobPost = getJobPostFromRequest(request);
     if (!jobPost) {
+      logger.warn("Resume tailoring rejected: missing job post", {
+        ...getRequestLogMeta(request, res),
+        userId: request.userId,
+      });
       return res
         .status(400)
         .json({ message: "A job post is required in `jobPost`" });
@@ -55,6 +70,11 @@ export const tailorResumePdf: RequestHandler = async (req, res: Response) => {
 
     const extractedResume = await extractResumePdf(request.file.buffer);
     if (extractedResume.pageCount !== 1) {
+      logger.warn("Resume tailoring rejected: invalid page count", {
+        ...getRequestLogMeta(request, res),
+        userId: request.userId,
+        pageCount: extractedResume.pageCount,
+      });
       return res.status(400).json({
         message:
           "The uploaded resume must be exactly 1 page. Multi-page resumes are not supported.",
@@ -66,6 +86,10 @@ export const tailorResumePdf: RequestHandler = async (req, res: Response) => {
     );
 
     if (editableLines.length === 0) {
+      logger.warn("Resume tailoring rejected: no editable lines", {
+        ...getRequestLogMeta(request, res),
+        userId: request.userId,
+      });
       return res.status(400).json({
         message:
           "No editable resume lines were found in the uploaded PDF. Try a text-based PDF instead of a scanned image.",
@@ -88,6 +112,15 @@ export const tailorResumePdf: RequestHandler = async (req, res: Response) => {
       pdfBuffer: request.file.buffer,
       extractedResume,
       changes: tailoring.changes,
+    });
+
+    logger.info("Resume tailored", {
+      ...getRequestLogMeta(request, res),
+      userId: request.userId,
+      fileName: request.file.originalname,
+      editableLines: editableLines.length,
+      appliedChanges: renderedResume.appliedChanges.length,
+      skippedChanges: renderedResume.rejectedChanges.length,
     });
 
     return res.status(200).json({
@@ -117,7 +150,11 @@ export const tailorResumePdf: RequestHandler = async (req, res: Response) => {
       },
     });
   } catch (error) {
-    console.error("Error tailoring resume PDF:", error);
+    logger.error("Resume tailoring failed", {
+      ...getRequestLogMeta(req, res),
+      userId: (req as ResumeTailorRequest).userId,
+      error,
+    });
     return res.status(500).json({
       message: "Failed to tailor the resume PDF",
     });

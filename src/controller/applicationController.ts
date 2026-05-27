@@ -4,6 +4,7 @@ import { type AuthedRequest } from "../middleware/auth.js";
 import mongoose from "mongoose";
 import { Profile } from "../models/profileModel.js";
 import { evaluateProfileJobMatch } from "../integrations/llm.js";
+import { getRequestLogMeta, logger } from "../lib/logger.js";
 
 const PATCH_TIMINGS_ENABLED =
   process.env.LOG_APPLICATION_PATCH_TIMINGS === "true";
@@ -92,12 +93,10 @@ function createPatchTimingLogger(req: AuthedRequest, res: Response) {
         return;
       }
 
-      console.log(
-        `[PATCH /api/applications/${req.params.id}] ${stage}: ${formatDurationMs(
-          startedAtNs,
-          endedAtNs,
-        )}`,
-      );
+      logger.info(`PATCH /api/applications/${req.params.id} ${stage}`, {
+        ...getRequestLogMeta(req, res),
+        duration: formatDurationMs(startedAtNs, endedAtNs),
+      });
     },
     logBoundary() {
       if (!PATCH_TIMINGS_ENABLED) {
@@ -105,20 +104,16 @@ function createPatchTimingLogger(req: AuthedRequest, res: Response) {
       }
 
       if (authCompletedAtNs) {
-        console.log(
-          `[PATCH /api/applications/${req.params.id}] auth+middleware: ${formatDurationMs(
-            requestStartedAtNs,
-            authCompletedAtNs,
-          )}`,
-        );
+        logger.info(`PATCH /api/applications/${req.params.id} auth+middleware`, {
+          ...getRequestLogMeta(req, res),
+          duration: formatDurationMs(requestStartedAtNs, authCompletedAtNs),
+        });
       }
 
-      console.log(
-        `[PATCH /api/applications/${req.params.id}] before-controller: ${formatDurationMs(
-          requestStartedAtNs,
-          controllerStartedAtNs,
-        )}`,
-      );
+      logger.info(`PATCH /api/applications/${req.params.id} before-controller`, {
+        ...getRequestLogMeta(req, res),
+        duration: formatDurationMs(requestStartedAtNs, controllerStartedAtNs),
+      });
     },
     finish() {
       if (!PATCH_TIMINGS_ENABLED) {
@@ -126,24 +121,23 @@ function createPatchTimingLogger(req: AuthedRequest, res: Response) {
       }
 
       const endedAtNs = process.hrtime.bigint();
-      console.log(
-        `[PATCH /api/applications/${req.params.id}] controller-total: ${formatDurationMs(
-          controllerStartedAtNs,
-          endedAtNs,
-        )}`,
-      );
-      console.log(
-        `[PATCH /api/applications/${req.params.id}] request-total: ${formatDurationMs(
-          requestStartedAtNs,
-          endedAtNs,
-        )}`,
-      );
+      logger.info(`PATCH /api/applications/${req.params.id} controller-total`, {
+        ...getRequestLogMeta(req, res),
+        duration: formatDurationMs(controllerStartedAtNs, endedAtNs),
+      });
+      logger.info(`PATCH /api/applications/${req.params.id} request-total`, {
+        ...getRequestLogMeta(req, res),
+        duration: formatDurationMs(requestStartedAtNs, endedAtNs),
+      });
     },
   };
 }
 
 async function buildAnalysisFields(userId: string, description: string) {
   if (!description.trim()) {
+    logger.info("Application analysis skipped: missing job description", {
+      userId,
+    });
     return {
       ltcAnalysis: null,
       analysisSkippedReason: "missing_job_description",
@@ -155,6 +149,9 @@ async function buildAnalysisFields(userId: string, description: string) {
   });
 
   if (!profile || !hasProfileSignal(profile)) {
+    logger.info("Application analysis skipped: insufficient profile", {
+      userId,
+    });
     return {
       ltcAnalysis: null,
       analysisSkippedReason: "insufficient_profile",
@@ -185,7 +182,10 @@ async function buildAnalysisFields(userId: string, description: string) {
       analysisSkippedReason: null,
     };
   } catch (error) {
-    console.error("Error evaluating LTC analysis:", error);
+    logger.error("Application analysis failed", {
+      userId,
+      error,
+    });
     return {
       ltcAnalysis: null,
       analysisSkippedReason: "analysis_failed",
@@ -209,16 +209,26 @@ export async function createApplication(req: AuthedRequest, res: Response) {
     } = req.body;
 
     if (!req.userId) {
+      logger.warn("Application creation rejected: unauthorized", getRequestLogMeta(req, res));
       return res.status(401).json({ message: "User Not authenticated" });
     }
 
     if (!company || !position) {
+      logger.warn("Application creation rejected: missing required fields", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+      });
       return res
         .status(400)
         .json({ message: "Company and position are required" });
     }
 
     if (status && !ApplicationStatus.includes(status)) {
+      logger.warn("Application creation rejected: invalid status", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+        status,
+      });
       return res.status(400).json({ message: "Invalid Status" });
     }
 
@@ -242,11 +252,22 @@ export async function createApplication(req: AuthedRequest, res: Response) {
       ...analysisFields,
     });
 
+    logger.info("Application created", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      applicationId: app._id.toString(),
+      status: app.status,
+    });
+
     return res
       .status(201)
       .json({ app, message: "Application created successfully" });
   } catch (error) {
-    console.error(`Error Message: ${error}`);
+    logger.error("Application creation failed", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      error,
+    });
     return res.status(500).json({ message: "Error creating application" });
   }
 }
@@ -254,6 +275,7 @@ export async function createApplication(req: AuthedRequest, res: Response) {
 export async function getApplication(req: AuthedRequest, res: Response) {
   try {
     if (!req.userId) {
+      logger.warn("Application list rejected: unauthorized", getRequestLogMeta(req, res));
       return res.status(401).json({ message: "User Not authenticated" });
     }
 
@@ -264,6 +286,10 @@ export async function getApplication(req: AuthedRequest, res: Response) {
     });
 
     if (apps.length === 0) {
+      logger.info("Application list returned empty", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+      });
       return res.status(200).json({
         apps: [],
         message:
@@ -271,8 +297,19 @@ export async function getApplication(req: AuthedRequest, res: Response) {
       });
     }
 
+    logger.info("Application list fetched", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      count: apps.length,
+    });
+
     return res.status(200).json({ apps });
   } catch (error) {
+    logger.error("Application list failed", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      error,
+    });
     return res.status(500).json({ message: "Application retrieve failed" });
   }
 }
@@ -288,14 +325,25 @@ export async function editApplication(req: AuthedRequest, res: Response) {
     );
 
     if (!id || Array.isArray(id)) {
+      logger.warn("Application update rejected: invalid id", getRequestLogMeta(req, res));
       return res.status(400).json({ message: "Invalid application ID" });
     }
 
     if (!req.userId) {
+      logger.warn("Application update rejected: unauthorized", {
+        ...getRequestLogMeta(req, res),
+        applicationId: id,
+      });
       return res.status(401).json({ message: "Unauthorized" });
     }
 
     if (updates.status && !ApplicationStatus.includes(updates.status)) {
+      logger.warn("Application update rejected: invalid status", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+        applicationId: id,
+        status: updates.status,
+      });
       return res.status(400).json({ message: "Invalid Status" });
     }
 
@@ -328,13 +376,29 @@ export async function editApplication(req: AuthedRequest, res: Response) {
     patchTiming.logStage("db-update", dbStartedAtNs);
 
     if (!app) {
+      logger.warn("Application update rejected: application not found", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+        applicationId: id,
+      });
       return res.status(404).json({ message: "Not Found" });
     }
 
     patchTiming.finish();
+    logger.info("Application updated", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      applicationId: id,
+      updatedFields: Object.keys(updates),
+    });
     return res.status(200).json({ app, message: "Updated Successfully" });
   } catch (e) {
-    console.error(`Error message ${e}`);
+    logger.error("Application update failed", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      applicationId: req.params.id,
+      error: e,
+    });
     return res.status(500).json({ message: "Error Updating" });
   }
 }
@@ -344,10 +408,15 @@ export async function deleteApplication(req: AuthedRequest, res: Response) {
     const { id } = req.params;
 
     if (!id || Array.isArray(id)) {
+      logger.warn("Application delete rejected: invalid id", getRequestLogMeta(req, res));
       return res.status(400).json({ message: "Invalid application ID" });
     }
 
     if (!req.userId) {
+      logger.warn("Application delete rejected: unauthorized", {
+        ...getRequestLogMeta(req, res),
+        applicationId: id,
+      });
       return res.status(401).json({ message: "Unauthorized" });
     }
 
@@ -356,11 +425,29 @@ export async function deleteApplication(req: AuthedRequest, res: Response) {
       userId: new mongoose.Types.ObjectId(req.userId),
     });
 
-    if (!deleted) return res.status(404).json({ message: "Not Found" });
+    if (!deleted) {
+      logger.warn("Application delete rejected: application not found", {
+        ...getRequestLogMeta(req, res),
+        userId: req.userId,
+        applicationId: id,
+      });
+      return res.status(404).json({ message: "Not Found" });
+    }
+
+    logger.info("Application deleted", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      applicationId: id,
+    });
 
     return res.status(200).json({ message: "Deleted" });
   } catch (e) {
-    console.error(`Error Message: ${e}`);
+    logger.error("Application delete failed", {
+      ...getRequestLogMeta(req, res),
+      userId: req.userId,
+      applicationId: req.params.id,
+      error: e,
+    });
     return res.status(500).json({ message: "Error Deleting" });
   }
 }

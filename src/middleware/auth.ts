@@ -1,5 +1,6 @@
 import { type Request, type Response, type NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { getRequestLogMeta, logger } from "../lib/logger.js";
 
 export type AuthedRequest = Request & { userId?: string };
 
@@ -11,10 +12,12 @@ export async function auth(
   try {
     const token = req.cookies.token;
     if (!token) {
+      logger.warn("Authentication failed: missing token", getRequestLogMeta(req, res));
       return res.status(401).json({ message: "Missing token" });
     }
     const secret = process.env.JWT_SECRET;
     if (!secret) {
+      logger.error("Authentication failed: missing JWT secret", getRequestLogMeta(req, res));
       return res.status(401).json({ message: "Missing Secret" });
     }
     const payload = jwt.verify(token, secret) as { userId: string };
@@ -27,9 +30,16 @@ export async function auth(
     ) {
       res.locals.authCompletedAtNs = process.hrtime.bigint();
     }
+    logger.info("Authentication succeeded", {
+      ...getRequestLogMeta(req, res),
+      userId: payload.userId,
+    });
     next();
   } catch (e) {
-    console.error(`Error Message: ${e}`);
+    logger.warn("Authentication failed: invalid token", {
+      ...getRequestLogMeta(req, res),
+      error: e,
+    });
     return res.status(401).json({ message: "Invalid token" });
   }
 }
