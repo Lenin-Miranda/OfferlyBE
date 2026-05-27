@@ -56,6 +56,24 @@ const ProfileJobMatchSchema = z.object({
   missingProfileSignals: z.array(z.string()),
 });
 
+const ProfileSchema = z.object({
+  fullName: z.string(),
+  location: z.string(),
+  summary: z.string(),
+  skills: z.array(z.string()),
+  yearsExperience: z.number().int().min(0),
+  targetRoles: z.array(z.string()),
+  preferredLocations: z.array(z.string()),
+  remotePreference: z.enum([
+    "remote",
+    "hybrid",
+    "onsite",
+    "flexible",
+    "unspecified",
+  ]),
+  workAuthorization: z.string(),
+});
+
 type EvaluateProfileJobMatchInput = {
   jobDescription: string;
   profile: {
@@ -200,5 +218,45 @@ export async function evaluateProfileJobMatch(
     throw new Error("OpenAI did not return a parsed profile job match");
   }
 
+  return response.output_parsed;
+}
+
+export async function summarizeResumeToProfile(resumePdfBase64: string) {
+  const prompt =
+    " You are a resume summarization assistant that extracts key profile information from a resume to create a concise user profile. Focus on identifying the candidate's full name, location, professional summary, skills, years of experience, target roles, preferred locations, remote work preference, and work authorization status. Be conservative in your assumptions and only include information that is clearly supported by the resume content. Return the profile information in a structured JSON format.";
+
+  const response = await getOpenAIClient().responses.parse({
+    model: getDefaultModel(),
+    input: [
+      {
+        role: "developer",
+        content: prompt,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_file",
+            filename: "resume.pdf",
+            file_data: `data:application/pdf;base64,${resumePdfBase64}`,
+          },
+        ],
+      },
+    ],
+    text: {
+      format: zodTextFormat(ProfileSchema, "profile_summary"),
+    },
+  });
+
+  if (!response.output_parsed) {
+    logger.error("Failed to parse profile summary from OpenAI response", {
+      rawResponse: response,
+    });
+    throw new Error("OpenAI did not return a parsed profile summary");
+  }
+
+  logger.info("Successfully summarized resume to profile", {
+    profile: response.output_parsed,
+  });
   return response.output_parsed;
 }
