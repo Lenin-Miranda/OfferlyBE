@@ -22,6 +22,7 @@ jest.unstable_mockModule("../integrations/llm.js", () => ({
 }));
 
 const { default: app } = await import("../app.js");
+const { Resume } = await import("../models/resumeModel.js");
 
 const validUser = {
   email: "test@test.com",
@@ -224,6 +225,41 @@ describe("Application Routes", () => {
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.apps)).toBe(true);
       expect(res.body.apps.length).toBe(2);
+    });
+  });
+
+  describe("DELETE /api/applications/:id", () => {
+    it("should delete linked tailored resumes when an application is removed", async () => {
+      const agent = await createAuthedAgent();
+      const createRes = await agent.post("/api/applications").send({
+        company: "Cursor",
+        position: "Engineer",
+        description: "Backend role with TypeScript.",
+      });
+
+      await Resume.create({
+        userId: createRes.body.app.userId,
+        applicationId: createRes.body.app._id,
+        originalFileName: "resume.pdf",
+        fileName: "resume-tailored.pdf",
+        mimeType: "application/pdf",
+        jobPost: "Backend role with TypeScript.",
+        summary: "Tailored resume",
+        pdfData: Buffer.from("%PDF-1.4 saved", "utf8"),
+        changes: [],
+        skippedChanges: [],
+      });
+
+      const deleteRes = await agent.delete(
+        `/api/applications/${createRes.body.app._id}`,
+      );
+
+      expect(deleteRes.status).toBe(200);
+      await expect(
+        Resume.countDocuments({
+          applicationId: createRes.body.app._id,
+        }),
+      ).resolves.toBe(0);
     });
   });
 });

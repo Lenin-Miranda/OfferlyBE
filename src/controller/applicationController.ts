@@ -3,6 +3,7 @@ import { type Response } from "express";
 import { type AuthedRequest } from "../middleware/auth.js";
 import mongoose from "mongoose";
 import { Profile } from "../models/profileModel.js";
+import { Resume } from "../models/resumeModel.js";
 import { evaluateProfileJobMatch } from "../integrations/llm.js";
 import { getRequestLogMeta, logger } from "../lib/logger.js";
 
@@ -434,10 +435,16 @@ export async function deleteApplication(req: AuthedRequest, res: Response) {
       return res.status(404).json({ message: "Not Found" });
     }
 
+    const deletedResumes = await Resume.deleteMany({
+      userId: new mongoose.Types.ObjectId(req.userId),
+      applicationId: deleted._id,
+    });
+
     logger.info("Application deleted", {
       ...getRequestLogMeta(req, res),
       userId: req.userId,
       applicationId: id,
+      deletedResumes: deletedResumes.deletedCount,
     });
 
     return res.status(200).json({ message: "Deleted" });

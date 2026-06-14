@@ -25,6 +25,26 @@ const lazyTailorResumePdf: RequestHandler = async (req, res, next) => {
   }
 };
 
+const lazyListApplicationResumes: RequestHandler = async (req, res, next) => {
+  try {
+    const { listApplicationResumes } = await import(
+      "../controller/resumeController.js"
+    );
+    await listApplicationResumes(req, res, next);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const lazyGetApplicationResume: RequestHandler = async (req, res, next) => {
+  try {
+    const { getApplicationResume } = await import("../controller/resumeController.js");
+    await getApplicationResume(req, res, next);
+  } catch (error) {
+    next(error);
+  }
+};
+
 const patchTimingProbe: RequestHandler = (req, res, next) => {
   if (
     process.env.LOG_APPLICATION_PATCH_TIMINGS === "true" &&
@@ -42,6 +62,14 @@ applicationRouter.post(
   resumeUpload.single("resume"),
   lazyTailorResumePdf,
 );
+applicationRouter.post(
+  "/:id/resume/tailor",
+  auth,
+  resumeUpload.single("resume"),
+  lazyTailorResumePdf,
+);
+applicationRouter.get("/:id/resumes", auth, lazyListApplicationResumes);
+applicationRouter.get("/:id/resumes/:resumeId", auth, lazyGetApplicationResume);
 applicationRouter.post("/", auth, createApplication);
 applicationRouter.get("/", auth, getApplication);
 applicationRouter.patch("/:id", patchTimingProbe, auth, editApplication);
